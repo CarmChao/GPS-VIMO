@@ -1,0 +1,5 @@
+#ifndef IMAGE_PROCESSOR_NODELET_H
+#define IMAGE_PROCESSOR_NODELET_H
+
+
+#endif

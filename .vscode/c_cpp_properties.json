@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/include/",
+                "/opt/ros/dashing/include/**",
+                "/usr/include/opencv2",
+                "/usr/include",
+                "/usr/include/eigen3",
+                "/opt/ros/dashing/include",
+                "/usr/include/pcl-1.8/",
+                "/usr/include/glog/"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

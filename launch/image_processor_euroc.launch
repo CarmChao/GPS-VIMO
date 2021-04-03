@@ -1,0 +1,4 @@
+<launch>
+  <node package="ros2_msckf" node_executable="image_processor"/>
+</launch>
+
