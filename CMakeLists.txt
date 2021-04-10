@@ -14,7 +14,7 @@ endif()
 set(CMAKE_MODULE_PATH &{CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  # add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 # find dependencies
@@ -23,6 +23,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(px4_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -84,6 +85,7 @@ ament_target_dependencies(image_processor
   "image_transport"
   "message_filters"
   "custom_msgs"
+  "px4_msgs"
   )
 # rosidl_target_interfaces(image_processor ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(image_processor ${OpenCV_LIBRARIES} ${GLOG_LIBRARIES})
@@ -109,7 +111,8 @@ ament_target_dependencies(msckf_vio
   "tf2_eigen"
   # "tf2"
   "pcl_conversions"
-  "custom_msgs")
+  "custom_msgs"
+  "px4_msgs")
 # rosidl_target_interfaces(msckf_vio ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(msckf_vio 
   ${OpenCV_LIBRARIES}

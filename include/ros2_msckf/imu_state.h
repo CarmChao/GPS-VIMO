@@ -51,10 +51,17 @@ struct IMUState {
   Eigen::Vector3d gyro_bias;
   Eigen::Vector3d acc_bias;
 
+  Eigen::Vector3d mag_ned;
+
+  Eigen::Vector3d mag_bias;
+
+  Eigen::Vector2d gps_bias;
+
   // Transformation between the IMU and the
   // left camera (cam0)
   Eigen::Matrix3d R_imu_cam0;
   Eigen::Vector3d t_cam0_imu;
+
 
   // These three variables should have the same physical
   // interpretation with `orientation`, `position`, and
@@ -89,7 +96,10 @@ struct IMUState {
     acc_bias(Eigen::Vector3d::Zero()),
     orientation_null(Eigen::Vector4d(0, 0, 0, 1)),
     position_null(Eigen::Vector3d::Zero()),
-    velocity_null(Eigen::Vector3d::Zero()) {}
+    velocity_null(Eigen::Vector3d::Zero()),
+    mag_ned(Eigen::Vector3d::Zero()),
+    mag_bias(Eigen::Vector3d::Zero()),
+    gps_bias(Eigen::Vector2d::Zero()) {}
 
   IMUState(const StateIDType& new_id): id(new_id), time(0),
     orientation(Eigen::Vector4d(0, 0, 0, 1)),

@@ -7,9 +7,9 @@
          -0.003759, -0.019359, 0.999806, -0.002,
          0.0,       0.0,       0.0,      1.0]
       camera_model: pinhole
-      distortion_coeffs: [0.549546, 0.296002, -0.857166, 0.505325]
+      distortion_coeffs: [0.57358849, 0.1265131, -0.42235454, 0.16392455]
       distortion_model: equidistant
-      intrinsics: [245.1435, 245.447, 321.5555, 213.2205]
+      intrinsics: [242.43652744, 242.76758739, 321.64257943, 212.41872327]
       resolution: [640, 400]
       timeshift_cam_imu: 0.0
     cam1:
@@ -24,9 +24,9 @@
   		  0.007499504247, -0.006995638145, 0.9999486994, -0.001381243423,
         0.0,         0.0,         0.0,             1.0]
       camera_model: pinhole
-      distortion_coeffs: [0.593821, 0.199323, -0.604329, 0.270467]
+      distortion_coeffs: [0.5806636, 0.17246609, -0.51235939, 0.22040843]
       distortion_model: equidistant
-      intrinsics: [245.988, 245.4165, 315.557, 203.7775]
+      intrinsics: [242.17058547, 242.00311377, 314.99164247, 202.87690912]
       resolution: [640, 400]
       timeshift_cam_imu: 0.0
     T_imu_body:

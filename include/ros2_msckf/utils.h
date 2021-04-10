@@ -44,6 +44,13 @@ public:
 private:
     boost::mt19937 generator_;
 };
+
+struct MagMsg
+{
+    double timestamp;
+
+    Eigen::Vector3d magnetometer_ga;
+};
 }//end ros2_msckf
 
 #endif

@@ -11,7 +11,8 @@
                 "/usr/include/eigen3",
                 "/opt/ros/dashing/include",
                 "/usr/include/pcl-1.8/",
-                "/usr/include/glog/"
+                "/usr/include/glog/",
+                "/home/chao/px4_ros/ros2_px4/install/px4_msgs/include/"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

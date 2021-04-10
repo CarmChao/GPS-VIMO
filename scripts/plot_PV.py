@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 import sys
+import math
 
 all_data = {}
 
@@ -52,7 +53,7 @@ def plot3DP():
         ax.plot(predict_pos[1], predict_pos[2], predict_pos[3])
     else:
         print('no correct_P')
-    ax1 = fig.add_subplot(221)
+    ax1 = fig.add_subplot(212)
     if 'process_update' in all_data:
         process_update_data  = all_data['process_update']
         ax1.plot(process_update_data[0], process_update_data[1])
@@ -121,14 +122,67 @@ def plotMag():
         # ax.scatter(sum_x, sum_y, sum_z, marker='p')
     plt.show()
     
+def calculateExMag():
+    if 'internal_mag' in all_data:
+        process_data  = all_data['internal_mag'][:200]
+        sum_x = 0.0
+        sum_y = 0.0
+        sum_z = 0.0
+        data_size = len(process_data[0])
+        raw_x = []
+        raw_y = []
+        raw_z = []
+        for i in range(data_size):
+            sum_x += process_data[1][i]
+            sum_y += process_data[2][i]
+            sum_z += process_data[3][i]
+        ave_x = sum_x/data_size
+        ave_y = sum_y/data_size
+        theta = math.atan2(ave_y, ave_x)
+        print(theta)
+        # sum_x /= data_size
+
+def plotYaw():
+    fig = plt.figure()
+    ax = fig.add_subplot(211)
+    ax_pos = fig.add_subplot(212)
+
+    if 'measure_yaw' in all_data:
+        print("measure_yaw")
+
+        process_data  = all_data['measure_yaw']
+        data_size = len(process_data[0])
+        ax.plot(process_data[0], process_data[1], label='measure')
+        ax.plot(process_data[0], process_data[2], label='predict')
+        # ax.plot(process_data[0], process_data[5], label='roll')
+        # ax.plot(process_data[0], process_data[4], label='pitch')
+        ax.plot(process_data[0], process_data[3], label='m_o')
+
+    if 'measure_gav' in all_data:
+
+        gav_data = all_data['measure_gav']
+        ax.plot(gav_data[0], gav_data[1], label='gav_x')
+        ax.plot(gav_data[0], gav_data[2], label='gav_y')
+        ax.plot(gav_data[0], gav_data[3], label='gav_z') 
+
+    if 'pos_cov' in all_data:
+        fast_data = all_data['pos_cov']
+        ax_pos.plot(fast_data[0], fast_data[1], label='x')
+        ax_pos.plot(fast_data[0], fast_data[2], label='y')
+        ax_pos.plot(fast_data[0], fast_data[3], label='z')
+    ax.legend()
+    ax_pos.legend()
+    plt.show()
 
 def main():
     readData()
     data_types = ['predict_P', 'correct_P']
     # plotData(data_types)
     # plot3DP()
-    # plotUpdate()
-    plotMag()
+    plotUpdate()
+    # plotMag()
+    # calculateExMag()
+    # plotYaw()
 
 
 if __name__ == "__main__":

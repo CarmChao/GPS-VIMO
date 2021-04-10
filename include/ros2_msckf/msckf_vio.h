@@ -4,12 +4,17 @@
 #include "imu_state.h"
 #include "cam_state.h"
 #include "feature.hpp"
+#include "ros2_msckf/math_utils.hpp"
+#include "ros2_msckf/utils.h"
 #include "custom_msgs/msg/camera_measurement.hpp"
 #include "visibility_control.h"
 
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "px4_msgs/msg/vehicle_magnetometer.hpp"
+#include "px4_msgs/msg/vehicle_gps_position.hpp"
+#include "px4_msgs/msg/vehicle_air_data.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "std_srvs/srv/trigger.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -23,6 +28,10 @@
 #include <string>
 #include <map>
 #include <memory>
+
+// #define MAG_FUSE
+// #define DECLINATION_FUSE
+// #define GPS_FUSE
 
 namespace ros2_msckf {
 /*
@@ -71,6 +80,52 @@ public:
         return static_cast<double>(stamp.sec) + static_cast<double>(stamp.nanosec)/1e9;
     }
 
+    static double stamp2sec(const uint64_t &timestamp)
+    {
+        double sec = timestamp/1000000;
+        return sec+static_cast<double>((timestamp-sec*1e6)/1e6);
+    }
+
+    static uint64_t stamp2sec(const double &time)
+    {
+
+    }
+    static double wrap(double x, double low, double high)
+    {
+    // already in range
+        if (low <= x && x < high) {
+            return x;
+        }
+
+            const double range = high - low;
+            const double inv_range = 1.0 / range; // should evaluate at compile time, multiplies below at runtime
+            const double num_wraps = floor((x - low) * inv_range);
+            return x - range * num_wraps;
+    }
+
+    static double wrap_pi(double x)
+    {
+        return wrap(x, -M_PI, M_PI);
+    }
+
+static Eigen::Vector3d Euler321(const Eigen::Matrix3d &R)
+    {
+        double roll = atan2(R(2, 1), R(2, 2));
+        double pitch = asin(-R(2, 0));
+        double yaw = atan2(R(1, 0), R(0, 0));
+
+        if (fabs(pitch - M_PI/2.0) < 1.0e-3) {
+            roll = 0;
+            yaw = atan2(R(1, 2), R(0, 2));
+
+        } else if (fabs(pitch + M_PI /2) < 1.0e-3) {
+            roll = 0;
+            yaw = atan2(-R(1, 2), -R(0, 2));
+        }
+
+        return Eigen::Vector3d(yaw, pitch, roll);
+    }
+
     typedef std::shared_ptr<MsckfVio> Ptr;
     typedef std::shared_ptr<const MsckfVio> ConstPtr;
 
@@ -116,6 +171,23 @@ private:
      */
     void featureCallback(const custom_msgs::msg::CameraMeasurement::SharedPtr msg);
 
+    void magCallback(const px4_msgs::msg::VehicleMagnetometer::SharedPtr msg);
+
+    void baroCallback(const px4_msgs::msg::VehicleAirData::SharedPtr msg);
+
+    void gpsCallback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
+
+    bool getMagData(MagMsg &mag_sample, const double &time_bound);
+
+    void magFusionControl(MagMsg &mag_sample, bool is_data_ready);
+    
+    void fuseMag(MagMsg &mag_sample);
+    
+    void fuseMag2D(MagMsg &mag_sample);
+    
+    void fuseMag3D(MagMsg &mag_sample);
+    
+    void fuseDeclination(double noise);
     /*
      * @brief publish Publish the results of VIO.
      * @param time The time stamp of output msgs.
@@ -127,7 +199,7 @@ private:
      *    Initialize the IMU bias and initial orientation
      *    based on the first few IMU readings.
      */
-    void initializeGravityAndBias();
+    bool initializeGravityAndBias();
 
     /*
      * @biref resetCallback
@@ -225,6 +297,9 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr feature_pub;
     tf2_ros::TransformBroadcaster tf_pub;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_srv;
+    rclcpp::Subscription<px4_msgs::msg::VehicleMagnetometer>::SharedPtr mag_sub;
+    rclcpp::Subscription<px4_msgs::msg::VehicleAirData>::SharedPtr baro_sub;
+    rclcpp::Subscription<px4_msgs::msg::VehicleGpsPosition>::SharedPtr gps_sub;
 
     // Frame id
     std::string fixed_frame_id;
@@ -237,6 +312,33 @@ private:
     // only used to determine the timing threshold of
     // each iteration of the filter.
     double frame_rate;
+
+    // bool FUSE_MAG = false;
+
+    LPF<Eigen::Vector3d> acc_filter;
+    LPF<Eigen::Vector3d> gyro_filter;
+
+    Eigen::Matrix3d R_mag_imu;
+    uint8_t mag_fusion_mode;
+    LPF<Eigen::Vector3d> mag_filter;
+    std::vector<MagMsg> mag_buffer;
+
+    Eigen::Vector3d curr_acc;
+    
+    double last_mag_time;
+    double ref_mag_strength;
+    double mag_strength_gate;
+    bool mag_bias_observable;
+    bool yaw_angle_observable;
+    double mag_acc_gate;        //0.5
+    double mag_yaw_rate_gate;   //0.25
+    double mag_heading_noise;   //0.3
+    double mag_noise;           //0.05
+    double yaw_declination;
+    //GPS
+    bool has_gps;
+
+    bool fuse_mag;
 
     // Debugging variables and functions
     void mocapOdomCallback(

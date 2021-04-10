@@ -71,7 +71,8 @@
         "qr": "cpp",
         "*.ipp": "cpp",
         "sparsecore": "cpp",
-        "geometry": "cpp"
+        "geometry": "cpp",
+        "dense": "cpp"
     },
     "python.pythonPath": "/usr/bin/python3"
 }

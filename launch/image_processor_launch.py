@@ -68,7 +68,10 @@ def generate_launch_description():
             {"initial_covariance.extrinsic_translation_cov": 2.5e-5},
             {"initial_state.velocity.x": 0.0},
             {"initial_state.velocity.y": 0.0},
-            {"initial_state.velocity.z": 0.0}
+            {"initial_state.velocity.z": 0.0},
+            {"mag_extrinsic": -0.1067},
+            {"fuse_mag": "true"},
+            {"mag_heading_noise": 0.3}
         ],
         remappings=[
             ('imu', topics[src_index][0])

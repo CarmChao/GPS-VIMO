@@ -158,6 +158,45 @@ inline Eigen::Vector4d rotationToQuaternion(
   return q;
 }
 
+template<typename T>
+class LPF
+{
+public:
+  LPF(float alpha=0.1)
+  {
+    _alpha = alpha;
+    _filter_state.setZero();
+  }
+
+  ~LPF() = default;
+
+  void update(T &new_val)
+  {
+    _filter_state = (1-_alpha)*_filter_state + _alpha*new_val;
+    // _filter_state = new_val;
+  }
+
+  T getState()
+  {
+    return _filter_state;
+  }
+
+  void resetState(T &new_val)
+  {
+    _filter_state = new_val;
+  }
+
+  void setAlpha(float alpha)
+  {
+    _alpha = alpha;
+  }
+
+private:
+
+  T _filter_state;
+  float _alpha;
+
+};
 } // end namespace msckf_vio
 
 #endif // MSCKF_VIO_MATH_UTILS_HPP
