@@ -165,7 +165,6 @@ public:
   LPF(float alpha=0.1)
   {
     _alpha = alpha;
-    _filter_state.setZero();
   }
 
   ~LPF() = default;
@@ -193,10 +192,16 @@ public:
 
 private:
 
-  T _filter_state;
+  T _filter_state{0};
   float _alpha;
 
 };
+
+template<typename _Tp>
+constexpr _Tp constrain(_Tp val, _Tp min_val, _Tp max_val)
+{
+	return (val < min_val) ? min_val : ((val > max_val) ? max_val : val);
+}
 } // end namespace msckf_vio
 
 #endif // MSCKF_VIO_MATH_UTILS_HPP

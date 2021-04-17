@@ -28,6 +28,7 @@
 #include <string>
 #include <map>
 #include <memory>
+#include <fstream>
 
 // #define MAG_FUSE
 // #define DECLINATION_FUSE
@@ -55,7 +56,9 @@ public:
     MsckfVio operator=(const MsckfVio&) = delete;
 
     // Destructor
-    ~MsckfVio() {}
+    ~MsckfVio() {
+        fout.close();
+    }
 
     /*
     * @brief initialize Initialize the VIO.
@@ -188,6 +191,18 @@ private:
     void fuseMag3D(MagMsg &mag_sample);
     
     void fuseDeclination(double noise);
+
+    void reinitMag();
+
+    bool checkGpsGood(px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
+
+    void gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample);
+    
+    void comMeasurementUpdate(const Eigen::MatrixXd& H, const Eigen::VectorXd& r, const Eigen::MatrixXd &noise);
+    
+    double getDeclination();
+    
+    int map_projection_reproject( );
     /*
      * @brief publish Publish the results of VIO.
      * @param time The time stamp of output msgs.
@@ -317,11 +332,21 @@ private:
 
     LPF<Eigen::Vector3d> acc_filter;
     LPF<Eigen::Vector3d> gyro_filter;
+    LPF<double> baro_filter;
 
     Eigen::Matrix3d R_mag_imu;
     uint8_t mag_fusion_mode;
     LPF<Eigen::Vector3d> mag_filter;
     std::vector<MagMsg> mag_buffer;
+
+    std::vector<double> baro_buffer;
+    std::vector<px4_msgs::msg::VehicleGpsPosition> gps_buffer;
+
+    double baro_ori_height;
+
+    bool gps_init;
+    bool gps_correct_mag;
+    bool has_gps;
 
     Eigen::Vector3d curr_acc;
     
@@ -335,10 +360,29 @@ private:
     double mag_heading_noise;   //0.3
     double mag_noise;           //0.05
     double yaw_declination;
+    double mag_inclination;
     //GPS
-    bool has_gps;
+    double ref_pos_lat;
+    double ref_pos_lon;
+    double ref_sin_lat;
+    double ref_cos_lat;
+    double gps_ori_height;
+
+    double gps_vel_innov_gate;
+    double gps_pos_innov_gate;
 
     bool fuse_mag;
+    bool fuse_d;
+    bool fuse_3d_mag;
+    bool fuse_gps;
+
+    std::ofstream fout;
+    std::string result_path;
+
+    Eigen::Matrix3d acc_com;
+    Eigen::Vector3d acc_bias;
+    Eigen::Matrix3d gyro_com;
+    Eigen::Vector3d gyro_bias;
 
     // Debugging variables and functions
     void mocapOdomCallback(

@@ -16,6 +16,7 @@ set(CMAKE_MODULE_PATH &{CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
+set(CMAKE_BUILD_TYPE Release)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -100,7 +101,8 @@ target_link_libraries(image_processor ${OpenCV_LIBRARIES} ${GLOG_LIBRARIES})
 add_executable(msckf_vio
   src/test_vio.cpp
   src/msckf_vio.cpp
-  src/utils.cpp)
+  src/utils.cpp
+  src/geo_mag_declination.cpp)
 ament_target_dependencies(msckf_vio
   "rclcpp"
   "rclcpp_components"

@@ -174,15 +174,65 @@ def plotYaw():
     ax_pos.legend()
     plt.show()
 
+def plotGPS():
+    fig = plt.figure()
+    ax = fig.add_subplot(211)
+    ax_pos = fig.add_subplot(212)
+
+    if 'gps' in all_data:
+        # print("measure_yaw")
+
+        process_data  = all_data['gps']
+        data_size = len(process_data[0])
+        ax.plot(process_data[0], process_data[1], label='nums')
+        ax.plot(process_data[0], process_data[3], label='eph')
+        # ax.plot(process_data[0], process_data[5], label='roll')
+        # ax.plot(process_data[0], process_data[4], label='pitch')
+        ax.plot(process_data[0], process_data[4], label='cov_v')
+
+    if 'gps_pos' in all_data:
+        print("found gps_pos!")
+        correct_data = all_data['correct_P']
+        process_data  = all_data['gps_pos']
+        data_size = len(process_data[0])
+        for i in range(len(process_data[0])):
+            process_data[0][i] = float(process_data[0][i])/1e6
+        ax_pos.plot(process_data[0], process_data[1], label='x')
+        ax_pos.plot(process_data[0], process_data[2], label='y')
+        ax_pos.plot(correct_data[0], correct_data[1], label='ex')
+        ax_pos.plot(correct_data[0], correct_data[2], label='ey')
+        # ax.plot(process_data[0], process_data[5], label='roll')
+        # ax.plot(process_data[0], process_data[4], label='pitch')
+        # ax.plot(process_data[0], process_data[4], label='cov_v')
+    if "gps_r" in all_data:
+        gps_r = all_data['gps_r']
+        for i in range(len(gps_r)):
+            gps_r[0][i] = float(gps_r[0][i])/1e6
+        
+        ax_pos.plot(gps_r[0], gps_r[1], label='gps_rx')
+        ax_pos.plot(gps_r[1], gps_r[2], label='gps_ry')
+    
+    if "gps_update" in all_data:
+        gps_r = all_data['gps_update']
+        for i in range(len(gps_r)):
+            gps_r[0][i] = float(gps_r[0][i])/1e6
+        
+        ax_pos.plot(gps_r[0], gps_r[1], label='gps_update')
+        # ax_pos.plot(gps_r[1], gps_r[2], label='gps_ry')
+    ax.legend()
+    ax_pos.legend()
+    plt.show()
+
 def main():
     readData()
     data_types = ['predict_P', 'correct_P']
     # plotData(data_types)
     # plot3DP()
-    plotUpdate()
+    # plotUpdate()
     # plotMag()
     # calculateExMag()
     # plotYaw()
+    plotGPS()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
-#define GRAVITY_ACCELERATION 9.81
+#define GRAVITY_ACCELERATION 9.806
 
 namespace ros2_msckf {
 
