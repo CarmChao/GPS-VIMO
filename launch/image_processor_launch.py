@@ -75,7 +75,7 @@ def generate_launch_description():
             {"fuse_mag": "true"},
             {"fuse_3d_mag": "false"},
             {"fuse_d": "false"},
-            {"fuse_gps": "false"},
+            {"fuse_gps": "true"},
             {"mag_heading_noise": 0.3},
             {"mag_noise": 0.05},
             {"save_path": "/home/chao/Documents/traj/ros2_msckf/result.csv"}

@@ -612,7 +612,7 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
   LOG(INFO)<<"gps_V: "<<gps_sample.timestamp<<" "<<measure_v(0)<<" "<<measure_v(1)<<" "<<measure_v(2);
   
   Matrix<double, 5, 1> r = Matrix<double, 5, 1>::Zero();
-  r.block<2,1>(0,0) = measure_pos - state_server.imu_state.position.head<2>();
+  r.block<2,1>(0,0) = measure_pos - state_server.imu_state.position.head<2>() + state_server.imu_state.gps_bias;
   r.block<3,1>(2,0) = measure_v - state_server.imu_state.velocity;
 
   LOG(INFO)<<"gps_r: "<<gps_sample.timestamp<<" "<<r(0,0)<<" "<<r(1,0)<<" "<<r(2,0)<<" "<<r(3,0)<<" "<<r(4,0);
@@ -634,9 +634,9 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
   {
     update = 1;
     RCLCPP_INFO(this->get_logger(), "update GPS !!");
-    MatrixXd H_gps = MatrixXd::Zero(5, 29+state_server.cam_states.size());
+    MatrixXd H_gps = MatrixXd::Zero(5, 29+ 6*state_server.cam_states.size());
     H_gps.block<2,2>(0,12) = Matrix2d::Identity();
-    // H_gps.block<2,2>(0,27) = Matrix2d::Identity()*(-1);
+    H_gps.block<2,2>(0,27) = Matrix2d::Identity()*(-1);
     H_gps.block<3,3>(2, 6) = Matrix3d::Identity();
 
     Matrix<double, 5, 5> n_gps = Matrix<double, 5, 5>::Zero();
@@ -738,15 +738,6 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
 	start_time = clocker.now();
 	removeLostFeatures();
 	double remove_lost_features_time = (clocker.now()-start_time).seconds();
-  LOG(INFO)<<"correct_P: "<<state_server.imu_state.time<<" "
-           <<state_server.imu_state.position[0]<<" "
-           <<state_server.imu_state.position[1]<<" "
-           <<state_server.imu_state.position[2];
-
-  LOG(INFO)<<"correct_V: "<<state_server.imu_state.time<<" "
-           <<state_server.imu_state.velocity[0]<<" "
-           <<state_server.imu_state.velocity[1]<<" "
-           <<state_server.imu_state.velocity[2];
 
 	start_time = clocker.now();
 	pruneCamStateBuffer();
@@ -757,6 +748,18 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
     reinitMag();
     gps_correct_mag = true;
   }
+
+  LOG(INFO)<<"correct_P: "<<state_server.imu_state.time<<" "
+           <<state_server.imu_state.position[0]<<" "
+           <<state_server.imu_state.position[1]<<" "
+           <<state_server.imu_state.position[2];
+
+  LOG(INFO)<<"correct_V: "<<state_server.imu_state.time<<" "
+           <<state_server.imu_state.velocity[0]<<" "
+           <<state_server.imu_state.velocity[1]<<" "
+           <<state_server.imu_state.velocity[2];
+
+  LOG(INFO)<<"cov_P: "<<state_server.imu_state.time<<" "<<state_server.state_cov(12,12)<<" "<<state_server.state_cov(13,13)<<" "<<state_server.state_cov(14,14);
   auto &s = state_server.imu_state;
   fout.setf(ios::fixed, ios::floatfield);
   fout.precision(5);  //1e9
@@ -1924,14 +1927,22 @@ void MsckfVio::comMeasurementUpdate(
 
   // Compute the Kalman gain.
   const MatrixXd& P = state_server.state_cov;
+  // cout<<"P: "<<P<<endl;
+  // cout<<"H: "<<H_thin<<endl;
   MatrixXd S = H_thin*P*H_thin.transpose() + noise;
+  // cout<<"S: "<<S<<endl;
   //MatrixXd K_transpose = S.fullPivHouseholderQr().solve(H_thin*P);
   MatrixXd K_transpose = S.ldlt().solve(H_thin*P);
   MatrixXd K = K_transpose.transpose();
+  const MatrixXd & P_p = P.block<2,2>(12,12);
+
+  // cout<<"noise: "<<noise<<endl;
   // cout<<"GPS K:"<<endl;
   // cout<<K<<endl;
 
   MatrixXd KHP = K*H_thin*P;
+  // cout<<"KHP: "<<endl;
+  // cout<<KHP<<endl;
 
   bool helthy_P = true;
 
