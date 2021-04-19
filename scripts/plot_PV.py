@@ -206,18 +206,18 @@ def plotGPS():
         # ax.plot(process_data[0], process_data[4], label='cov_v')
     if "gps_r" in all_data:
         gps_r = all_data['gps_r']
-        for i in range(len(gps_r)):
+        for i in range(len(gps_r[0])):
             gps_r[0][i] = float(gps_r[0][i])/1e6
         
         ax_pos.plot(gps_r[0], gps_r[1], label='gps_rx')
-        ax_pos.plot(gps_r[1], gps_r[2], label='gps_ry')
+        ax_pos.plot(gps_r[0], gps_r[2], label='gps_ry')
     
     if "gps_update" in all_data:
         gps_r = all_data['gps_update']
-        for i in range(len(gps_r)):
+        for i in range(len(gps_r[0])):
             gps_r[0][i] = float(gps_r[0][i])/1e6
         
-        ax_pos.plot(gps_r[0], gps_r[1], label='gps_update')
+        ax_pos.plot(gps_r[0], gps_r[1], label='gps_update', marker='o')
         # ax_pos.plot(gps_r[1], gps_r[2], label='gps_ry')
     ax.legend()
     ax_pos.legend()

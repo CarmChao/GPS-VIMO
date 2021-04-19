@@ -263,7 +263,7 @@ private:
         std::vector<StateIDType>& rm_cam_state_ids);
     void pruneCamStateBuffer();
     // Reset the system online if the uncertainty is too large.
-    void onlineReset();
+    void onlineReset(int type_r);
 
     // Chi squared test table.
     static std::map<int, double> chi_squared_test_table;

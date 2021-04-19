@@ -384,7 +384,7 @@ bool MsckfVio::initializeGravityAndBias() {
       double theta_yaw = -atan2(Mag_w(1), Mag_w(0));
       if(has_gps)
       {
-        LOG(INFO)<<"init Mag with yaw_declination: "<< yaw_declination;
+        LOG(INFO)<<"init Mag with yaw_declination, "<< yaw_declination;
         theta_yaw += yaw_declination;
         gps_correct_mag = true;
       }
@@ -528,7 +528,7 @@ void MsckfVio::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr ms
     yaw_declination = get_mag_declination_radians(lat, lon);
     mag_inclination = get_mag_inclination_radians(lat, lon);
     ref_mag_strength = get_mag_strength_gauss(lat, lon);
-    LOG(INFO)<<"get yaw_declination: "<<yaw_declination;
+    LOG(INFO)<<"get yaw_declination, "<<yaw_declination;
     has_gps = true;
   }
 
@@ -543,7 +543,7 @@ void MsckfVio::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr ms
       ref_sin_lat = sin(ref_pos_lat);
       ref_cos_lat = cos(ref_pos_lat);
       map_projection_reproject();
-      state_server.state_cov.block<2,2>(27,27) = Matrix2d::Identity()*msg->eph;
+      // state_server.state_cov.block<2,2>(27,27) = Matrix2d::Identity()*msg->eph;
     }
     else
     {
@@ -609,9 +609,10 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
   double vxy_cov = max(double(gps_sample.s_variance_m_s), 0.3);
   double vz_cov = pow(1.5,2)*vxy_cov;
   LOG(INFO)<<"gps_pos: "<<gps_sample.timestamp<<" "<<measure_pos(0)<<" "<<measure_pos(1);
+  LOG(INFO)<<"gps_V: "<<gps_sample.timestamp<<" "<<measure_v(0)<<" "<<measure_v(1)<<" "<<measure_v(2);
   
   Matrix<double, 5, 1> r = Matrix<double, 5, 1>::Zero();
-  r.block<2,1>(0,0) = measure_pos - state_server.imu_state.position.head<2>() + state_server.imu_state.gps_bias;
+  r.block<2,1>(0,0) = measure_pos - state_server.imu_state.position.head<2>();
   r.block<3,1>(2,0) = measure_v - state_server.imu_state.velocity;
 
   LOG(INFO)<<"gps_r: "<<gps_sample.timestamp<<" "<<r(0,0)<<" "<<r(1,0)<<" "<<r(2,0)<<" "<<r(3,0)<<" "<<r(4,0);
@@ -635,7 +636,7 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
     RCLCPP_INFO(this->get_logger(), "update GPS !!");
     MatrixXd H_gps = MatrixXd::Zero(5, 29+state_server.cam_states.size());
     H_gps.block<2,2>(0,12) = Matrix2d::Identity();
-    H_gps.block<2,2>(0,27) = Matrix2d::Identity()*(-1);
+    // H_gps.block<2,2>(0,27) = Matrix2d::Identity()*(-1);
     H_gps.block<3,3>(2, 6) = Matrix3d::Identity();
 
     Matrix<double, 5, 5> n_gps = Matrix<double, 5, 5>::Zero();
@@ -650,6 +651,7 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
     // r.block<3,1>(2,0) = measure_v - state_server.imu_state.velocity;
 
     comMeasurementUpdate(H_gps, r, n_gps);
+    onlineReset(2);
   }
 
   LOG(INFO)<<"gps_update: "<<gps_sample.timestamp<<" "<<update;
@@ -773,7 +775,7 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
 	double publish_time = (clocker.now()-start_time).seconds();
 
 	// Reset the system if necessary.
-	onlineReset();
+	onlineReset(1);
 
 	double processing_end_time = clocker.now().seconds();
 	double processing_time =
@@ -1878,6 +1880,10 @@ void MsckfVio::measurementUpdate(
       dq_extrinsic) * state_server.imu_state.R_imu_cam0;
   state_server.imu_state.t_cam0_imu += delta_x_imu.segment<3>(18);
 
+  state_server.imu_state.mag_ned += delta_x_imu.segment<3>(21);
+  state_server.imu_state.mag_bias += delta_x_imu.segment<3>(24);
+  state_server.imu_state.gps_bias += delta_x_imu.segment<2>(27);
+
   // Update the camera states.
   auto cam_state_iter = state_server.cam_states.begin();
   for (int i = 0; i < state_server.cam_states.size();
@@ -1913,33 +1919,8 @@ void MsckfVio::comMeasurementUpdate(
   MatrixXd H_thin;
   VectorXd r_thin;
 
-  if (H.rows() > H.cols()) {
-    // Convert H to a sparse matrix.
-    SparseMatrix<double> H_sparse = H.sparseView();
-
-    // Perform QR decompostion on H_sparse.
-    SPQR<SparseMatrix<double> > spqr_helper;
-    spqr_helper.setSPQROrdering(SPQR_ORDERING_NATURAL);
-    spqr_helper.compute(H_sparse);
-
-    MatrixXd H_temp;
-    VectorXd r_temp;
-    (spqr_helper.matrixQ().transpose() * H).evalTo(H_temp);
-    (spqr_helper.matrixQ().transpose() * r).evalTo(r_temp);
-
-    H_thin = H_temp.topRows(29+state_server.cam_states.size()*6);
-    r_thin = r_temp.head(29+state_server.cam_states.size()*6);
-
-    //HouseholderQR<MatrixXd> qr_helper(H);
-    //MatrixXd Q = qr_helper.householderQ();
-    //MatrixXd Q1 = Q.leftCols(21+state_server.cam_states.size()*6);
-
-    //H_thin = Q1.transpose() * H;
-    //r_thin = Q1.transpose() * r;
-  } else {
-    H_thin = H;
-    r_thin = r;
-  }
+  H_thin = H;
+  r_thin = r;
 
   // Compute the Kalman gain.
   const MatrixXd& P = state_server.state_cov;
@@ -1947,72 +1928,89 @@ void MsckfVio::comMeasurementUpdate(
   //MatrixXd K_transpose = S.fullPivHouseholderQr().solve(H_thin*P);
   MatrixXd K_transpose = S.ldlt().solve(H_thin*P);
   MatrixXd K = K_transpose.transpose();
+  // cout<<"GPS K:"<<endl;
+  // cout<<K<<endl;
 
-  // Compute the error of the state.
-  VectorXd delta_x = K * r_thin;
+  MatrixXd KHP = K*H_thin*P;
 
-  // Update the IMU state.
-  const VectorXd& delta_x_imu = delta_x.head<29>();
-  // LOG(INFO)<<"delta_P: "<<state_server.imu_state.time<<" "
-  //          <<delta_x_imu[12]<<" "
-  //          <<delta_x_imu[13]<<" "
-  //          <<delta_x_imu[14];
-  // LOG(INFO)<<"delta_V: "<<state_server.imu_state.time<<" "
-  //          <<delta_x_imu[6]<<" "
-  //          <<delta_x_imu[7]<<" "
-  //          <<delta_x_imu[8];
+  bool helthy_P = true;
 
-  if (//delta_x_imu.segment<3>(0).norm() > 0.15 ||
-      //delta_x_imu.segment<3>(3).norm() > 0.15 ||
-      delta_x_imu.segment<3>(6).norm() > 0.5 ||
-      //delta_x_imu.segment<3>(9).norm() > 0.5 ||
-      delta_x_imu.segment<3>(12).norm() > 1.0) {
-    printf("delta velocity: %f\n", delta_x_imu.segment<3>(6).norm());
-    printf("delta position: %f\n", delta_x_imu.segment<3>(12).norm());
-    RCLCPP_WARN(get_logger(), "Update change is too large.");
-    //return;
+  for(int i=0; i<29+6*state_server.cam_states.size(); i++)
+  {
+    if(P(i,i) < KHP(i,i))
+    {
+      helthy_P = false;
+    }
   }
 
-  const Vector4d dq_imu =
-    smallAngleQuaternion(delta_x_imu.head<3>());
-  state_server.imu_state.orientation = quaternionMultiplication(
-      dq_imu, state_server.imu_state.orientation);
-  state_server.imu_state.gyro_bias += delta_x_imu.segment<3>(3);
-  state_server.imu_state.velocity += delta_x_imu.segment<3>(6);
-  state_server.imu_state.acc_bias += delta_x_imu.segment<3>(9);
-  state_server.imu_state.position += delta_x_imu.segment<3>(12);
+  if(helthy_P)
+  {
+    // Compute the error of the state.
+    VectorXd delta_x = K * r_thin;
 
-  const Vector4d dq_extrinsic =
-    smallAngleQuaternion(delta_x_imu.segment<3>(15));
-  state_server.imu_state.R_imu_cam0 = quaternionToRotation(
-      dq_extrinsic) * state_server.imu_state.R_imu_cam0;
-  state_server.imu_state.t_cam0_imu += delta_x_imu.segment<3>(18);
+    // Update the IMU state.
+    const VectorXd& delta_x_imu = delta_x.head<29>();
+    // LOG(INFO)<<"delta_P: "<<state_server.imu_state.time<<" "
+    //          <<delta_x_imu[12]<<" "
+    //          <<delta_x_imu[13]<<" "
+    //          <<delta_x_imu[14];
+    // LOG(INFO)<<"delta_V: "<<state_server.imu_state.time<<" "
+    //          <<delta_x_imu[6]<<" "
+    //          <<delta_x_imu[7]<<" "
+    //          <<delta_x_imu[8];
 
-  state_server.imu_state.mag_ned += delta_x_imu.segment<3>(21);
-  state_server.imu_state.mag_bias += delta_x_imu.segment<3>(24);
-  state_server.imu_state.gps_bias += delta_x_imu.segment<2>(27);
+    if (//delta_x_imu.segment<3>(0).norm() > 0.15 ||
+        //delta_x_imu.segment<3>(3).norm() > 0.15 ||
+        delta_x_imu.segment<3>(6).norm() > 0.5 ||
+        //delta_x_imu.segment<3>(9).norm() > 0.5 ||
+        delta_x_imu.segment<3>(12).norm() > 1.0) {
+      printf("delta velocity: %f\n", delta_x_imu.segment<3>(6).norm());
+      printf("delta position: %f\n", delta_x_imu.segment<3>(12).norm());
+      RCLCPP_WARN(get_logger(), "Update change is too large.");
+      //return;
+    }
 
-  // Update the camera states.
-  auto cam_state_iter = state_server.cam_states.begin();
-  for (int i = 0; i < state_server.cam_states.size();
-      ++i, ++cam_state_iter) {
-    const VectorXd& delta_x_cam = delta_x.segment<6>(29+i*6);
-    const Vector4d dq_cam = smallAngleQuaternion(delta_x_cam.head<3>());
-    cam_state_iter->second.orientation = quaternionMultiplication(
-        dq_cam, cam_state_iter->second.orientation);
-    cam_state_iter->second.position += delta_x_cam.tail<3>();
+    const Vector4d dq_imu =
+      smallAngleQuaternion(delta_x_imu.head<3>());
+    state_server.imu_state.orientation = quaternionMultiplication(
+        dq_imu, state_server.imu_state.orientation);
+    state_server.imu_state.gyro_bias += delta_x_imu.segment<3>(3);
+    state_server.imu_state.velocity += delta_x_imu.segment<3>(6);
+    state_server.imu_state.acc_bias += delta_x_imu.segment<3>(9);
+    state_server.imu_state.position += delta_x_imu.segment<3>(12);
+
+    const Vector4d dq_extrinsic =
+      smallAngleQuaternion(delta_x_imu.segment<3>(15));
+    state_server.imu_state.R_imu_cam0 = quaternionToRotation(
+        dq_extrinsic) * state_server.imu_state.R_imu_cam0;
+    state_server.imu_state.t_cam0_imu += delta_x_imu.segment<3>(18);
+
+    state_server.imu_state.mag_ned += delta_x_imu.segment<3>(21);
+    state_server.imu_state.mag_bias += delta_x_imu.segment<3>(24);
+    state_server.imu_state.gps_bias += delta_x_imu.segment<2>(27);
+
+    // Update the camera states.
+    auto cam_state_iter = state_server.cam_states.begin();
+    for (int i = 0; i < state_server.cam_states.size();
+        ++i, ++cam_state_iter) {
+      const VectorXd& delta_x_cam = delta_x.segment<6>(29+i*6);
+      const Vector4d dq_cam = smallAngleQuaternion(delta_x_cam.head<3>());
+      cam_state_iter->second.orientation = quaternionMultiplication(
+          dq_cam, cam_state_iter->second.orientation);
+      cam_state_iter->second.position += delta_x_cam.tail<3>();
+    }
+
+    // Update state covariance.
+    MatrixXd I_KH = MatrixXd::Identity(K.rows(), H_thin.cols()) - K*H_thin;
+    //state_server.state_cov = I_KH*state_server.state_cov*I_KH.transpose() +
+    //  K*K.transpose()*Feature::observation_noise;
+    state_server.state_cov -= KHP;
+
+    // Fix the covariance to be symmetric
+    MatrixXd state_cov_fixed = (state_server.state_cov +
+        state_server.state_cov.transpose()) / 2.0;
+    state_server.state_cov = state_cov_fixed;
   }
-
-  // Update state covariance.
-  MatrixXd I_KH = MatrixXd::Identity(K.rows(), H_thin.cols()) - K*H_thin;
-  //state_server.state_cov = I_KH*state_server.state_cov*I_KH.transpose() +
-  //  K*K.transpose()*Feature::observation_noise;
-  state_server.state_cov = I_KH*state_server.state_cov;
-
-  // Fix the covariance to be symmetric
-  MatrixXd state_cov_fixed = (state_server.state_cov +
-      state_server.state_cov.transpose()) / 2.0;
-  state_server.state_cov = state_cov_fixed;
 
   return;
 }
@@ -2305,35 +2303,35 @@ void MsckfVio::pruneCamStateBuffer() {
   return;
 }
 
-void MsckfVio::onlineReset() {
+void MsckfVio::onlineReset(int type_r) {
 
 	// Never perform online reset if position std threshold
 	// is non-positive.
-	if (position_std_threshold <= 0) return;
-	static long long int online_reset_counter = 0;
+  if (position_std_threshold <= 0) return;
+  static long long int online_reset_counter = 0;
 
 	// Check the uncertainty of positions to determine if
 	// the system can be reset.
-	double position_x_std = std::sqrt(state_server.state_cov(12, 12));
-	double position_y_std = std::sqrt(state_server.state_cov(13, 13));
-	double position_z_std = std::sqrt(state_server.state_cov(14, 14));
+  double position_x_std = std::sqrt(state_server.state_cov(12, 12));
+  double position_y_std = std::sqrt(state_server.state_cov(13, 13));
+  double position_z_std = std::sqrt(state_server.state_cov(14, 14));
 
-	if (position_x_std < position_std_threshold &&
-		position_y_std < position_std_threshold &&
-		position_z_std < position_std_threshold)
+  if (position_x_std < position_std_threshold &&
+    position_y_std < position_std_threshold &&
+    position_z_std < position_std_threshold)
     {
       LOG(INFO)<<"reset: "<<state_server.imu_state.time<<" "<<0;
       return;
     }
 
-  LOG(INFO)<<"reset: "<<state_server.imu_state.time<<" "<<1;
-	RCLCPP_WARN(get_logger(), "Start %lld online reset procedure...",
-		++online_reset_counter);
-	RCLCPP_INFO(get_logger(), "Stardard deviation in xyz: %f, %f, %f",
-		position_x_std, position_y_std, position_z_std);
+  LOG(INFO)<<"reset: "<<state_server.imu_state.time<<" "<<type_r;
+  RCLCPP_WARN(get_logger(), "Start %lld online reset procedure...",
+    ++online_reset_counter);
+  RCLCPP_INFO(get_logger(), "Stardard deviation in xyz: %f, %f, %f",
+    position_x_std, position_y_std, position_z_std);
 
 	// Remove all existing camera states.
-	state_server.cam_states.clear();
+  state_server.cam_states.clear();
 
 	// Clear all exsiting features in the map.
 	map_server.clear();
