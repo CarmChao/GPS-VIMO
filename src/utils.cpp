@@ -1,3 +1,10 @@
+/*
+ * COPYRIGHT AND PERMISSION NOTICE
+ * Penn Software MSCKF_VIO
+ * Copyright (C) 2017 The Trustees of the University of Pennsylvania
+ * All rights reserved.
+ */
+
 #include "ros2_msckf/utils.h"
 #include <string>
 #include <vector>

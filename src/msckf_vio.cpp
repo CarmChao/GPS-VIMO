@@ -1,3 +1,10 @@
+/*
+ * COPYRIGHT AND PERMISSION NOTICE
+ * Penn Software MSCKF_VIO
+ * Copyright (C) 2017 The Trustees of the University of Pennsylvania
+ * All rights reserved.
+ */
+
 #include "ros2_msckf/msckf_vio.h"
 #include "ros2_msckf/geo_mag_declination.h"
 
@@ -66,6 +73,7 @@ MsckfVio::MsckfVio():
   baro_filter.setAlpha(0.1);
   gps_init = false;
   has_gps = false;
+  mag_cov_reset = true;
   gps_correct_mag = false;
 
   acc_com<< 0.999495, 0.001916, 0.003466,
@@ -80,6 +88,8 @@ MsckfVio::MsckfVio():
 
   gps_vel_innov_gate = 5.0;
   gps_pos_innov_gate = 5.0;
+  travel_length = 0;
+  pose_ne0 = Vector2d::Zero();
   // fout.open("/home/chao/Documents/traj/ros2_msckf/result.csv", ios::app);
   return;
 }
@@ -157,6 +167,9 @@ bool MsckfVio::loadParameters() {
   for (int i = 18; i < 21; ++i)
     state_server.state_cov(i, i) = extrinsic_translation_cov;
 
+  for (int i = 24; i<27; i++)
+    state_server.state_cov(i, i) = 1e-4;
+
   // Transformation offsets between the frames involved.
   Isometry3d T_cam0_imu = utils::getTransformEigen(shared_from_this(), "cam0.T_cam_imu");
   // Isometry3d T_cam0_imu = T_imu_cam0.inverse();
@@ -175,6 +188,8 @@ bool MsckfVio::loadParameters() {
   fuse_gps = this->declare_parameter<bool>("fuse_gps", false);
   mag_heading_noise = this->declare_parameter<double>("mag_heading_noise", 0.5);
   mag_noise = this->declare_parameter<double>("mag_noise", 0.05);
+  gps_invalid_interval = this->declare_parameter<double>("gps_reset_interval", 10);
+  gps_cov_k = this->declare_parameter<double>("gps_cov_k", 20);
   result_path = this->declare_parameter<string>("save_path","/home/chao/Documents/traj/ros2_msckf/result.csv");
   fout.open(result_path, ios::app);
   Matrix3d R_imu_cam;
@@ -391,6 +406,7 @@ bool MsckfVio::initializeGravityAndBias() {
       AngleAxisd yaw_rot(theta_yaw, Vector3d(0,0,1));
       R_i_w = yaw_rot.toRotationMatrix()*R_i_w;
       state_server.imu_state.mag_ned = yaw_rot.toRotationMatrix()*Mag_w;
+      state_server.state_cov.block<3,3>(21,21) = Matrix3d::Identity()*1e-2;
       RCLCPP_INFO(this->get_logger(), "mag initialize: %f", theta_yaw);
 
 #endif
@@ -508,8 +524,8 @@ bool MsckfVio::checkGpsGood(px4_msgs::msg::VehicleGpsPosition::SharedPtr msg)
 {
   bool gps_sats_status = msg->satellites_used>11;
   bool gps_fix_status = msg->fix_type>2;
-  bool gps_eph_status = msg->eph < 3;
-  bool gps_sacc_status = msg->s_variance_m_s < 0.5;
+  bool gps_eph_status = msg->eph < 3.5;
+  bool gps_sacc_status = msg->s_variance_m_s < 1;
 
   LOG(INFO)<<"gps: "<<msg->timestamp<<" "<<int(msg->satellites_used)<<" "<<int(msg->fix_type)<<" "<<msg->eph<<" "<<msg->s_variance_m_s;
   // return true;
@@ -543,7 +559,7 @@ void MsckfVio::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr ms
       ref_sin_lat = sin(ref_pos_lat);
       ref_cos_lat = cos(ref_pos_lat);
       map_projection_reproject();
-      // state_server.state_cov.block<2,2>(27,27) = Matrix2d::Identity()*msg->eph;
+      state_server.state_cov.block<2,2>(27,27) = Matrix2d::Identity()*msg->eph;
     }
     else
     {
@@ -632,6 +648,11 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
 
   if(fuse_gps && test_ratio<=1.0)
   {
+    double gps_time = stamp2sec(gps_sample.timestamp);
+    if(gps_time-last_valid_gps_time > gps_invalid_interval)
+      travel_length = 0;
+    
+    last_valid_gps_time = gps_time;
     update = 1;
     RCLCPP_INFO(this->get_logger(), "update GPS !!");
     MatrixXd H_gps = MatrixXd::Zero(5, 29+ 6*state_server.cam_states.size());
@@ -639,16 +660,11 @@ void MsckfVio::gpsUpdate(px4_msgs::msg::VehicleGpsPosition& gps_sample)
     H_gps.block<2,2>(0,27) = Matrix2d::Identity()*(-1);
     H_gps.block<3,3>(2, 6) = Matrix3d::Identity();
 
+    pos_cov = constrain(pos_cov*gps_cov_k/(travel_length+1), 0.05, pos_cov);
     Matrix<double, 5, 5> n_gps = Matrix<double, 5, 5>::Zero();
     n_gps.block<2,2>(0,0) = pos_cov*Matrix2d::Identity();
     n_gps.block<2,2>(2,2) = vxy_cov*Matrix2d::Identity();
     n_gps(4,4) = vz_cov;
-
-    // auto &state_cov = state_server.state_cov;
-    // MatrixXd Q = H_gps*stat_cov*H_gps.transpose();
-    // Matrix<double, 5, 1> r = Matrix<double, 5, 1>::Zero();
-    // r.block<2,1>(0,0) = measure_pos - state_server.imu_state.position.head<2>();
-    // r.block<3,1>(2,0) = measure_v - state_server.imu_state.velocity;
 
     comMeasurementUpdate(H_gps, r, n_gps);
     onlineReset(2);
@@ -701,6 +717,8 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
     double msg_time = stamp2sec(msg->header.stamp);
 		state_server.imu_state.time = msg_time;
     last_mag_time = msg_time;
+    pose_ne0 = state_server.imu_state.position.head<2>();
+    last_valid_gps_time = msg_time;
 	}
 
 	static double max_processing_time = 0.0;
@@ -743,11 +761,16 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
 	pruneCamStateBuffer();
 	double prune_cam_states_time = (clocker.now()-start_time).seconds();
 
+  Vector2d pose_ne1 = state_server.imu_state.position.head<2>();
+  travel_length += (pose_ne1 - pose_ne0).norm();
+
   if((!gps_correct_mag)&& has_gps)
   {
     reinitMag();
     gps_correct_mag = true;
   }
+
+  pose_ne0 = pose_ne1;
 
   LOG(INFO)<<"correct_P: "<<state_server.imu_state.time<<" "
            <<state_server.imu_state.position[0]<<" "
@@ -760,6 +783,9 @@ void MsckfVio::featureCallback(const custom_msgs::msg::CameraMeasurement::Shared
            <<state_server.imu_state.velocity[2];
 
   LOG(INFO)<<"cov_P: "<<state_server.imu_state.time<<" "<<state_server.state_cov(12,12)<<" "<<state_server.state_cov(13,13)<<" "<<state_server.state_cov(14,14);
+  
+  const Vector3d &B_ned = state_server.imu_state.mag_ned;
+  LOG(INFO)<<"B_ned: "<<state_server.imu_state.time<<" "<<B_ned(0)<<" "<<B_ned(1)<<" "<<B_ned(2);
   auto &s = state_server.imu_state;
   fout.setf(ios::fixed, ios::floatfield);
   fout.precision(5);  //1e9
@@ -901,7 +927,7 @@ bool MsckfVio::getMagData(MagMsg &mag_sample, const double &time_bound)
 
   mag_sample.timestamp = sum_time/valid_count;
   mag_sample.magnetometer_ga  = sum_mag/valid_count;
-  RCLCPP_INFO(this->get_logger(), "get mag data count: %d", valid_count);
+  // RCLCPP_INFO(this->get_logger(), "get mag data count: %d", valid_count);
   return true;
 }
 
@@ -1106,142 +1132,56 @@ void MsckfVio::fuseMag3D(MagMsg &mag_sample)
 
   if(fuse_mag)
   {
+    Matrix3d noise_mag = pow(mag_noise, 2)*Matrix3d::Identity();
+    comMeasurementUpdate(H_mag, r, noise_mag);
     //对齐测量值的z轴后不进行融合z(2) = 0;
-    // Compute the Kalman gain.
-    const MatrixXd& P = state_server.state_cov;
-    Matrix3d S = H_mag*P*H_mag.transpose() +
-        pow(mag_noise,2)*Matrix3d::Identity();
-    //MatrixXd K_transpose = S.fullPivHouseholderQr().solve(H_thin*P);
-    MatrixXd K_transpose = S.ldlt().solve(H_mag*P);
-    MatrixXd K = K_transpose.transpose();
-
-    // Compute the error of the state.
-    VectorXd delta_x = K * r;
-
-    // Update the IMU state.
-    const VectorXd& delta_x_imu = delta_x.head<29>();
-    // LOG(INFO)<<"delta_P: "<<state_server.imu_state.time<<" "
-    //          <<delta_x_imu[12]<<" "
-    //          <<delta_x_imu[13]<<" "
-    //          <<delta_x_imu[14];
-    // LOG(INFO)<<"delta_V: "<<state_server.imu_state.time<<" "
-    //          <<delta_x_imu[6]<<" "
-    //          <<delta_x_imu[7]<<" "
-    //          <<delta_x_imu[8];
-
-    if (//delta_x_imu.segment<3>(0).norm() > 0.15 ||
-        //delta_x_imu.segment<3>(3).norm() > 0.15 ||
-        delta_x_imu.segment<3>(6).norm() > 0.5 ||
-        //delta_x_imu.segment<3>(9).norm() > 0.5 ||
-        delta_x_imu.segment<3>(12).norm() > 1.0) {
-      printf("delta velocity: %f\n", delta_x_imu.segment<3>(6).norm());
-      printf("delta position: %f\n", delta_x_imu.segment<3>(12).norm());
-      RCLCPP_WARN(get_logger(), "Update change is too large.");
-      //return;
-    }
-
-    const Vector4d dq_imu =
-      smallAngleQuaternion(delta_x_imu.head<3>());
-    state_server.imu_state.orientation = quaternionMultiplication(
-        dq_imu, state_server.imu_state.orientation);
-    state_server.imu_state.gyro_bias += delta_x_imu.segment<3>(3);
-    state_server.imu_state.velocity += delta_x_imu.segment<3>(6);
-    state_server.imu_state.acc_bias += delta_x_imu.segment<3>(9);
-    state_server.imu_state.position += delta_x_imu.segment<3>(12);
-
-    const Vector4d dq_extrinsic =
-      smallAngleQuaternion(delta_x_imu.segment<3>(15));
-    state_server.imu_state.R_imu_cam0 = quaternionToRotation(
-        dq_extrinsic) * state_server.imu_state.R_imu_cam0;
-    state_server.imu_state.t_cam0_imu += delta_x_imu.segment<3>(18);
-
-    state_server.imu_state.mag_ned += delta_x_imu.segment<3>(21);
-    state_server.imu_state.mag_bias += delta_x_imu.segment<3>(24);
-    state_server.imu_state.gps_bias += delta_x_imu.segment<2>(27);
-
-    // Update the camera states.
-    auto cam_state_iter = state_server.cam_states.begin();
-    for (int i = 0; i < state_server.cam_states.size();
-        ++i, ++cam_state_iter) {
-      const VectorXd& delta_x_cam = delta_x.segment<6>(29+i*6);
-      const Vector4d dq_cam = smallAngleQuaternion(delta_x_cam.head<3>());
-      cam_state_iter->second.orientation = quaternionMultiplication(
-          dq_cam, cam_state_iter->second.orientation);
-      cam_state_iter->second.position += delta_x_cam.tail<3>();
-    }
-
-    // Update state covariance.
-    MatrixXd I_KH = MatrixXd::Identity(K.rows(), H_mag.cols()) - K*H_mag;
-    //state_server.state_cov = I_KH*state_server.state_cov*I_KH.transpose() +
-    //  K*K.transpose()*Feature::observation_noise;
-    state_server.state_cov = I_KH*state_server.state_cov;
-
-    // Fix the covariance to be symmetric
-    MatrixXd state_cov_fixed = (state_server.state_cov +
-        state_server.state_cov.transpose()) / 2.0;
-    state_server.state_cov = state_cov_fixed;
-
-    fuseDeclination(0.5);    //初始 0.02为何？
   }
-
-  //fuse_declination:
 
   return;
 }
 
-// void Ekf::limitDeclination()
-// {
-// 	// get a reference value for the earth field declinaton and minimum plausible horizontal field strength
-// 	// set to 50% of the horizontal strength from geo tables if location is known
-// 	float decl_reference;
-// 	float h_field_min = 0.001f;
-// 	if (_params.mag_declination_source & MASK_USE_GEO_DECL) {
-// 		// use parameter value until GPS is available, then use value returned by geo library
-// 		if (_NED_origin_initialised) {
-// 			decl_reference = _mag_declination_gps;
-// 			h_field_min = fmaxf(h_field_min , 0.5f * _mag_strength_gps * cosf(_mag_inclination_gps));
-// 		} else {
-// 			decl_reference = math::radians(_params.mag_declination_deg);
-// 		}
-// 	} else {
-// 		// always use the parameter value
-// 		decl_reference = math::radians(_params.mag_declination_deg);
-// 	}
 
-// 	// do not allow the horizontal field length to collapse - this will make the declination fusion badly conditioned
-// 	// and can result in a reversal of the NE field states which the filter cannot recover from
-// 	// apply a circular limit
-// 	float h_field = sqrtf(_state.mag_I(0)*_state.mag_I(0) + _state.mag_I(1)*_state.mag_I(1));
-// 	if (h_field < h_field_min) {
-// 		if (h_field > 0.001f * h_field_min) {
-// 			float h_scaler = h_field_min / h_field;
-// 			_state.mag_I(0) *= h_scaler;
-// 			_state.mag_I(1) *= h_scaler;
-// 		} else {
-// 			// too small to scale radially so set to expected value
-// 			float mag_declination = getMagDeclination();
-// 			_state.mag_I(0) = 2.0f * h_field_min * cosf(mag_declination);
-// 			_state.mag_I(1) = 2.0f * h_field_min * sinf(mag_declination);
-// 		}
-// 		h_field = h_field_min;
-// 	}
+void MsckfVio::limitDeclination()
+{
+	// get a reference value for the earth field declinaton and minimum plausible horizontal field strength
+	// set to 50% of the horizontal strength from geo tables if location is known
+	double decl_reference = yaw_declination;
+	double h_field_min = 0.001f;
+	// do not allow the horizontal field length to collapse - this will make the declination fusion badly conditioned
+	// and can result in a reversal of the NE field states which the filter cannot recover from
+	// apply a circular limit
+  Vector3d &mag_ned = state_server.imu_state.mag_ned;
+	double h_field = sqrtf(mag_ned(0)*mag_ned(0) + mag_ned(1)*mag_ned(1));
+	if (h_field < h_field_min) {
+		if (h_field > 0.001f * h_field_min) {
+			double h_scaler = h_field_min / h_field;
+			mag_ned(0) *= h_scaler;
+			mag_ned(1) *= h_scaler;
+		} else {
+			// too small to scale radially so set to expected value
+			double mag_declination = getDeclination();
+			mag_ned(0) = 2.0f * h_field_min * cosf(mag_declination);
+			mag_ned(1) = 2.0f * h_field_min * sinf(mag_declination);
+		}
+		h_field = h_field_min;
+	}
 
-// 	// do not allow the declination estimate to vary too much relative to the reference value
-// 	constexpr float decl_tolerance = 0.5f;
-// 	const float decl_max = decl_reference + decl_tolerance;
-// 	const float decl_min = decl_reference - decl_tolerance;
-// 	const float decl_estimate = atan2f(_state.mag_I(1) , _state.mag_I(0));
-// 	if (decl_estimate > decl_max)  {
-// 		_state.mag_I(0) = h_field * cosf(decl_max);
-// 		_state.mag_I(1) = h_field * sinf(decl_max);
-// 	} else if (decl_estimate < decl_min)  {
-// 		_state.mag_I(0) = h_field * cosf(decl_min);
-// 		_state.mag_I(1) = h_field * sinf(decl_min);
-// 	}
-// }
+	// do not allow the declination estimate to vary too much relative to the reference value
+	constexpr float decl_tolerance = 0.5f;
+	const float decl_max = decl_reference + decl_tolerance;
+	const float decl_min = decl_reference - decl_tolerance;
+	const float decl_estimate = atan2f(mag_ned(1) , mag_ned(0));
+	if (decl_estimate > decl_max)  {
+		mag_ned(0) = h_field * cosf(decl_max);
+		mag_ned(1) = h_field * sinf(decl_max);
+	} else if (decl_estimate < decl_min)  {
+		mag_ned(0) = h_field * cosf(decl_min);
+		mag_ned(1) = h_field * sinf(decl_min);
+	}
+}
 
-//z轴磁力计数据和参考值对齐，这样就不进行融合了
-//前提有GPS数据，获取到了参考表
+// z轴磁力计数据和参考值对齐，这样就不进行融合了
+// 前提有GPS数据，获取到了参考表
 // float Ekf::calculate_synthetic_mag_z_measurement(const Vector3f& mag_meas, const Vector3f& mag_earth_predicted)
 // {
 // 	// theoretical magnitude of the magnetometer Z component value given X and Y sensor measurement and our knowledge
@@ -1322,9 +1262,11 @@ void MsckfVio::fuseDeclination(double noise)
     MatrixXd state_cov_fixed = (state_server.state_cov +
         state_server.state_cov.transpose()) / 2.0;
     state_server.state_cov = state_cov_fixed;
+
+    limitDeclination();      //限制融合后NED下磁力计值
   }
 
-  //limitDeclination()限制融合后NED下磁力计值
+
 
 }
 
@@ -1333,13 +1275,21 @@ void MsckfVio::fuseMag(MagMsg &mag_sample)
   if(mag_fusion_mode == 1)
   {
     fuseMag2D(mag_sample);
-    RCLCPP_INFO(this->get_logger(), "fuse 2d mag");
   }
   else
   {
     //第一次 3d融合，先融declination
-    fuseMag3D(mag_sample);
-    RCLCPP_INFO(this->get_logger(), "fuse 3d mag");
+    if(mag_cov_reset)
+    {
+      mag_cov_reset = false;
+      fuseDeclination(0.02);
+      fuseMag3D(mag_sample);
+    }
+    else
+    {
+      fuseMag3D(mag_sample);
+      fuseDeclination(0.5);
+    }
   }
 }
 
@@ -1352,6 +1302,7 @@ void MsckfVio::batchImuProcessing(const double& time_bound) {
   MagMsg mag_sample;
   bool mag_data_ready = getMagData(mag_sample, time_bound);
   magFusionControl(mag_sample, mag_data_ready);
+  LOG(INFO)<<"mag_fusion_mode: "<<(state_server.imu_state.time + time_bound)/2<<" "<<int(mag_fusion_mode);
 #endif
   bool gps_data_ready = false;
   px4_msgs::msg::VehicleGpsPosition gps_sample;
@@ -1395,7 +1346,8 @@ void MsckfVio::batchImuProcessing(const double& time_bound) {
     }
 #endif
 
-    if(gps_data_ready && gps_time_d<imu_time)
+    Vector2d v_ne = state_server.imu_state.velocity.head<2>();
+    if(v_ne.norm()>0.1 && gps_data_ready && gps_time_d<imu_time)
     {
       gpsUpdate(gps_sample);
       gps_data_ready = false;
@@ -1913,17 +1865,7 @@ void MsckfVio::measurementUpdate(
 }
 
 void MsckfVio::comMeasurementUpdate(
-    const MatrixXd& H, const VectorXd& r, const MatrixXd &noise) {
-  // RCLCPP_INFO(get_logger(), "enter measurementUpdate");
-  if (H.rows() == 0 || r.rows() == 0) return;
-
-  // Decompose the final Jacobian matrix to reduce computational
-  // complexity as in Equation (28), (29).
-  MatrixXd H_thin;
-  VectorXd r_thin;
-
-  H_thin = H;
-  r_thin = r;
+    const MatrixXd& H_thin, const VectorXd& r_thin, const MatrixXd &noise) {
 
   // Compute the Kalman gain.
   const MatrixXd& P = state_server.state_cov;
@@ -1934,7 +1876,6 @@ void MsckfVio::comMeasurementUpdate(
   //MatrixXd K_transpose = S.fullPivHouseholderQr().solve(H_thin*P);
   MatrixXd K_transpose = S.ldlt().solve(H_thin*P);
   MatrixXd K = K_transpose.transpose();
-  const MatrixXd & P_p = P.block<2,2>(12,12);
 
   // cout<<"noise: "<<noise<<endl;
   // cout<<"GPS K:"<<endl;
@@ -1999,6 +1940,7 @@ void MsckfVio::comMeasurementUpdate(
     state_server.imu_state.mag_ned += delta_x_imu.segment<3>(21);
     state_server.imu_state.mag_bias += delta_x_imu.segment<3>(24);
     state_server.imu_state.gps_bias += delta_x_imu.segment<2>(27);
+    LOG(INFO)<<"d_mag: "<<state_server.imu_state.time<<" "<<delta_x_imu(21)<<" "<<delta_x_imu(22)<<" "<<delta_x_imu(23);
 
     // Update the camera states.
     auto cam_state_iter = state_server.cam_states.begin();
@@ -2012,7 +1954,7 @@ void MsckfVio::comMeasurementUpdate(
     }
 
     // Update state covariance.
-    MatrixXd I_KH = MatrixXd::Identity(K.rows(), H_thin.cols()) - K*H_thin;
+    // MatrixXd I_KH = MatrixXd::Identity(K.rows(), H_thin.cols()) - K*H_thin;
     //state_server.state_cov = I_KH*state_server.state_cov*I_KH.transpose() +
     //  K*K.transpose()*Feature::observation_noise;
     state_server.state_cov -= KHP;
@@ -2389,6 +2331,8 @@ void MsckfVio::onlineReset(int type_r) {
 	for (int i = 18; i < 21; ++i)
 		state_server.state_cov(i, i) = extrinsic_translation_cov;
   state_server.state_cov(2,2) = pow(mag_heading_noise, 2);
+
+  mag_cov_reset = true;
 
 	RCLCPP_WARN(get_logger(), "%lld online reset complete...", online_reset_counter);
 	return;

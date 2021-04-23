@@ -76,9 +76,10 @@ def generate_launch_description():
             {"fuse_3d_mag": "false"},
             {"fuse_d": "false"},
             {"fuse_gps": "true"},
-            {"mag_heading_noise": 0.3},
-            {"mag_noise": 0.05},
-            {"save_path": "/home/chao/Documents/traj/ros2_msckf/result.csv"}
+            {"mag_heading_noise": 0.2},
+            {"mag_noise": 0.1},
+            {"gps_cov_k": 10.0},
+            {"save_path": "/home/chao/Documents/traj/ros2_msckf/gps_result.csv"}
         ],
         remappings=[
             ('imu', topics[src_index][0])

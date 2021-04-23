@@ -1,3 +1,10 @@
+/*
+ * COPYRIGHT AND PERMISSION NOTICE
+ * Penn Software MSCKF_VIO
+ * Copyright (C) 2017 The Trustees of the University of Pennsylvania
+ * All rights reserved.
+ */
+
 #ifndef MSCKF_VIO_H
 #define MSCKF_VIO_H
 
@@ -192,6 +199,8 @@ private:
     
     void fuseDeclination(double noise);
 
+    void limitDeclination();
+
     void reinitMag();
 
     bool checkGpsGood(px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
@@ -201,6 +210,7 @@ private:
     void comMeasurementUpdate(const Eigen::MatrixXd& H, const Eigen::VectorXd& r, const Eigen::MatrixXd &noise);
     
     double getDeclination();
+
     
     int map_projection_reproject( );
     /*
@@ -355,6 +365,7 @@ private:
     double mag_strength_gate;
     bool mag_bias_observable;
     bool yaw_angle_observable;
+    bool mag_cov_reset;
     double mag_acc_gate;        //0.5
     double mag_yaw_rate_gate;   //0.25
     double mag_heading_noise;   //0.3
@@ -370,6 +381,9 @@ private:
 
     double gps_vel_innov_gate;
     double gps_pos_innov_gate;
+    double last_valid_gps_time;
+    double gps_invalid_interval;
+    double gps_cov_k;
 
     bool fuse_mag;
     bool fuse_d;
@@ -383,6 +397,9 @@ private:
     Eigen::Vector3d acc_bias;
     Eigen::Matrix3d gyro_com;
     Eigen::Vector3d gyro_bias;
+
+    double travel_length;
+    Eigen::Vector2d pose_ne0;
 
     // Debugging variables and functions
     void mocapOdomCallback(
